@@ -1,18 +1,15 @@
 /**
  * Servidor do Bot de WhatsApp com IA Gemini - Pizzaria DellOS
- * 100% Gratuito usando Google Gemini 1.5 Flash API + Evolution API v2
- * Código Seguro: NENHUMA chave embutida no código fonte.
+ * Compatível 100% com as novas chaves `AQ.` do Google AI Studio 2026.
  */
 
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(express.json());
 
-// A chave é lida EXCLUSIVAMENTE das variáveis de ambiente seguras (Render / Railway)
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 const SYSTEM_PROMPT = `
@@ -44,7 +41,7 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Chaves AQ. Válidas)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -54,7 +51,6 @@ app.post('/webhook/whatsapp', async (req, res) => {
       return res.status(500).json({ error: 'GEMINI_API_KEY_MISSING' });
     }
 
-    const genAI = new GoogleGenerativeAI(GEMINI_KEY);
     const payload = req.body;
     console.log('[Webhook Received]:', JSON.stringify(payload));
 
@@ -69,7 +65,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     if (!messageText) return res.status(200).send({ status: 'no_text_message' });
 
-    // Trava de segurança para evitar loops das respostas da própria IA
+    // Trava de segurança para não dar loop infinito nas respostas da IA
     if (messageText.includes('Confirmação de Lançamento') || 
         messageText.includes('Venda Registrada') ||
         messageText.startsWith('📝') || 
@@ -80,16 +76,29 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     console.log(`[WhatsApp Processing] De ${userPhone}: "${messageText}"`);
 
-    // Chamada à API Gratuita do Gemini
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
-      generationConfig: { responseMimeType: "application/json" }
+    // Chamada HTTP Direta à API do Gemini suportando o novo formato `AQ.` da Google
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`;
+    
+    const requestBody = {
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: `${SYSTEM_PROMPT}\n\nMensagem do Gestor: "${messageText}"` }]
+        }
+      ],
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
+    };
+
+    const geminiResponse = await axios.post(geminiUrl, requestBody, {
+      headers: {
+        'x-goog-api-key': GEMINI_KEY.trim(),
+        'Content-Type': 'application/json'
+      }
     });
 
-    const prompt = `${SYSTEM_PROMPT}\n\nMensagem do Gestor: "${messageText}"`;
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
-    
+    const responseText = geminiResponse.data.candidates[0].content.parts[0].text;
     const parsedJSON = JSON.parse(responseText);
     console.log('[Gemini IA Response]:', parsedJSON);
 
@@ -112,8 +121,8 @@ app.post('/webhook/whatsapp', async (req, res) => {
     return res.status(200).json({ status: 'success', parsed: parsedJSON });
 
   } catch (error) {
-    console.error('[Erro Webhook]:', error.message);
-    return res.status(500).json({ status: 'error', error: error.message });
+    console.error('[Erro Webhook]:', error.response?.data || error.message);
+    return res.status(500).json({ status: 'error', error: error.response?.data || error.message });
   }
 });
 
