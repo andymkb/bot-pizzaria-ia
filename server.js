@@ -1,6 +1,6 @@
 /**
  * Servidor do Bot de WhatsApp com IA Groq (Llama 3.3 70B) + Conexão Supabase
- * Gravação Automática de Lançamentos Financeiros DRE em Tempo Real!
+ * BLOQUEIO RIGOROSO DE GRUPOS (@g.us) - Responde apenas em chats privados!
  */
 
 require('dotenv').config();
@@ -42,7 +42,7 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Groq + Supabase DB)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Private Chats Only)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -61,6 +61,12 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     if (!userPhone) return res.status(200).send({ status: 'no_user_phone' });
 
+    // 🛑 BLOQUEIO ABSOLUTO DE GRUPOS DO WHATSAPP (@g.us)
+    if (userPhone.endsWith('@g.us') || messageData.key?.participant) {
+      console.log(`[WhatsApp Ignored Group] Mensagem de grupo ignorada (${userPhone})`);
+      return res.status(200).send({ status: 'ignored_group_message' });
+    }
+
     const messageText = messageData.message?.conversation || 
                         messageData.message?.extendedTextMessage?.text ||
                         messageData.body;
@@ -76,7 +82,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
       return res.status(200).send({ status: 'ignored_bot_own_response' });
     }
 
-    console.log(`[WhatsApp Processing Groq] De ${userPhone}: "${messageText}"`);
+    console.log(`[WhatsApp Processing Private Chat] De ${userPhone}: "${messageText}"`);
 
     // Chamada à API Ultra-Rápida do Groq (Llama 3.3 70B Versatile)
     const groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
