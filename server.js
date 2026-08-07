@@ -1,7 +1,7 @@
 /**
  * Servidor do Bot de WhatsApp com IA Gemini - Pizzaria DellOS
  * 100% Gratuito usando Google Gemini 1.5 Flash API + Evolution API v2
- * Suporta mensagens próprias do gestor (fromMe: true) sem loop infinito!
+ * Código Seguro: NENHUMA chave embutida no código fonte.
  */
 
 require('dotenv').config();
@@ -12,8 +12,8 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const app = express();
 app.use(express.json());
 
-const GEMINI_KEY = process.env.GEMINI_API_KEY || 'AQ.Ab8RN6L2c4H5pN-62xI1AknmUjLaWuFGWH9X2ik7pe6T_PNWjg';
-const genAI = new GoogleGenerativeAI(GEMINI_KEY);
+// A chave é lida EXCLUSIVAMENTE das variáveis de ambiente seguras (Render / Railway)
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 const SYSTEM_PROMPT = `
 Você é o Assessor Financeiro DellOS, um agente especialista em gestão financeira e DRE de pizzarias delivery.
@@ -44,13 +44,19 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Mensagens Próprias Habilitadas)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
   try {
+    if (!GEMINI_KEY) {
+      console.error('[Erro] GEMINI_API_KEY não configurada nas variáveis de ambiente.');
+      return res.status(500).json({ error: 'GEMINI_API_KEY_MISSING' });
+    }
+
+    const genAI = new GoogleGenerativeAI(GEMINI_KEY);
     const payload = req.body;
-    console.log('[Webhook Data]:', JSON.stringify(payload));
+    console.log('[Webhook Received]:', JSON.stringify(payload));
 
     const messageData = payload.data || payload;
     const userPhone = messageData.key?.remoteJid;
@@ -63,7 +69,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     if (!messageText) return res.status(200).send({ status: 'no_text_message' });
 
-    // Trava de segurança para não dar loop infinito quando o robô responder
+    // Trava de segurança para evitar loops das respostas da própria IA
     if (messageText.includes('Confirmação de Lançamento') || 
         messageText.includes('Venda Registrada') ||
         messageText.startsWith('📝') || 
