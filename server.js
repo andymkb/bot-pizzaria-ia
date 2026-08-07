@@ -1,6 +1,6 @@
 /**
- * Servidor do Bot de WhatsApp com IA Groq (Llama 3.3 70B) - Pizzaria DellOS
- * 100% Gratuito, Ultra-Rápido (sub-segundo) e Sem limites de cota zerada!
+ * Servidor do Bot de WhatsApp com IA Groq (Llama 3.3 70B) + Conexão Supabase
+ * Gravação Automática de Lançamentos Financeiros DRE em Tempo Real!
  */
 
 require('dotenv').config();
@@ -10,7 +10,8 @@ const axios = require('axios');
 const app = express();
 app.use(express.json());
 
-const GROQ_KEY = process.env.GROQ_API_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://xahnpppotcieqdqspvmy.supabase.co';
+const SUPABASE_KEY = process.env.SUPABASE_KEY || 'sb_publishable_sw3WY4mg1fX0bNJT6bSDjA_gzBczyB-';
 
 const SYSTEM_PROMPT = `
 Você é o Assessor Financeiro DellOS, um agente especialista em gestão financeira e DRE de pizzarias delivery.
@@ -41,7 +42,7 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Groq Llama 3.3 Engine)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Groq + Supabase DB)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -101,6 +102,31 @@ app.post('/webhook/whatsapp', async (req, res) => {
     const parsedJSON = JSON.parse(responseContent);
     console.log('[Groq IA Success Response]:', parsedJSON);
 
+    // Grava transação diretamente no Banco de Dados Supabase em Nuvem
+    try {
+      const t = parsedJSON.transacao;
+      await axios.post(`${SUPABASE_URL}/rest/v1/transacoes`, {
+        tipo: t.tipo || 'despesa',
+        categoria_dre: t.categoria_dre || 'CMV_INSUMOS',
+        subcategoria: t.subcategoria || 'Outros',
+        fornecedor_canal: t.fornecedor_canal || 'Não informado',
+        valor: parseFloat(t.valor) || 0,
+        forma_pagamento: t.forma_pagamento || 'Outros',
+        mensagem_original: messageText,
+        confirmado: true
+      }, {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        }
+      });
+      console.log('[Supabase Success] Transação gravada com SUCESSO no banco SQL!');
+    } catch (dbErr) {
+      console.error('[Supabase Warning] Erro ao gravar transação no banco:', dbErr.response?.data || dbErr.message);
+    }
+
     // Dispara resposta para a Evolution API no Railway
     const evoUrl = process.env.EVOLUTION_API_URL || 'https://evolution-api-production-16bcd.up.railway.app';
     const evoKey = process.env.EVOLUTION_API_KEY || 'dellos_pizza_2026';
@@ -127,4 +153,4 @@ app.post('/webhook/whatsapp', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor Bot WhatsApp IA (Groq) rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Servidor Bot WhatsApp IA (Groq + Supabase) rodando na porta ${PORT}`));
