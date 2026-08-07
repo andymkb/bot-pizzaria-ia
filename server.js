@@ -1,6 +1,6 @@
 /**
  * Servidor do Bot de WhatsApp com IA Gemini - Pizzaria DellOS
- * Atualizado com suporte automático aos modelos ativos: gemini-2.5-flash / gemini-2.0-flash / gemini-1.5-flash-latest
+ * Endpoint REST oficial: generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent
  */
 
 require('dotenv').config();
@@ -39,7 +39,7 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Multi-Model Engine)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -75,12 +75,12 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     console.log(`[WhatsApp Processing] De ${userPhone}: "${messageText}"`);
 
-    // Lista de modelos suportados em ordem de prioridade
+    // Lista de modelos padrão oficiais da Google REST v1beta
     const candidateModels = [
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'gemini-1.5-flash-latest',
-      'gemini-1.5-pro-latest'
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+      'gemini-1.0-pro',
+      'gemini-pro'
     ];
 
     let geminiResponse = null;
@@ -98,26 +98,25 @@ app.post('/webhook/whatsapp', async (req, res) => {
       }
     };
 
-    // Tenta cada modelo até obter resposta com sucesso
+    // Tenta cada modelo oficial
     for (const modelName of candidateModels) {
       try {
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-        console.log(`[Gemini Request] Tentando modelo: ${modelName}...`);
+        console.log(`[Gemini Request] Tentando: ${modelName}...`);
         
         geminiResponse = await axios.post(geminiUrl, requestBody, {
           headers: {
-            'x-goog-api-key': apiKey,
             'Content-Type': 'application/json'
           }
         });
         
-        if (geminiResponse.data) {
-          console.log(`[Gemini Success] Respondido com sucesso pelo modelo ${modelName}!`);
+        if (geminiResponse.data && geminiResponse.data.candidates) {
+          console.log(`[Gemini Success] Respondido pelo modelo ${modelName}!`);
           break;
         }
       } catch (err) {
         lastErr = err.response?.data || err.message;
-        console.warn(`[Gemini Warning] Modelo ${modelName} retornou erro, tentando o próximo...`);
+        console.warn(`[Gemini Warning] Modelo ${modelName} erro:`, JSON.stringify(lastErr));
       }
     }
 
