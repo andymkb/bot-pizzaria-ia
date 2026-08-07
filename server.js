@@ -1,6 +1,6 @@
 /**
  * Servidor do Bot de WhatsApp com IA Gemini - Pizzaria DellOS
- * Passa o parâmetro ?key= e header x-goog-api-key para compatibilidade total.
+ * Atualizado com suporte automático aos modelos ativos: gemini-2.5-flash / gemini-2.0-flash / gemini-1.5-flash-latest
  */
 
 require('dotenv').config();
@@ -39,7 +39,7 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (REST Engine)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Multi-Model Engine)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -47,13 +47,11 @@ app.post('/webhook/whatsapp', async (req, res) => {
     const rawKey = process.env.GEMINI_API_KEY;
     
     if (!rawKey) {
-      console.error('[Erro] GEMINI_API_KEY vazia ou não encontrada no Environment do Render.');
+      console.error('[Erro] GEMINI_API_KEY vazia no Environment do Render.');
       return res.status(500).json({ error: 'GEMINI_API_KEY_MISSING' });
     }
 
     const apiKey = rawKey.trim();
-    console.log(`[Gemini Auth] Usando chave com prefixo: ${apiKey.substring(0, 10)}...`);
-
     const payload = req.body;
     const messageData = payload.data || payload;
     const userPhone = messageData.key?.remoteJid;
@@ -66,7 +64,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     if (!messageText) return res.status(200).send({ status: 'no_text_message' });
 
-    // Trava de segurança para não dar loop nas respostas da própria IA
+    // Trava de segurança para não dar loop nas respostas do próprio bot
     if (messageText.includes('Confirmação de Lançamento') || 
         messageText.includes('Venda Registrada') ||
         messageText.startsWith('📝') || 
@@ -77,9 +75,17 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     console.log(`[WhatsApp Processing] De ${userPhone}: "${messageText}"`);
 
-    // Endpoint REST oficial com chave no ?key= e no header x-goog-api-key
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-    
+    // Lista de modelos suportados em ordem de prioridade
+    const candidateModels = [
+      'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-pro-latest'
+    ];
+
+    let geminiResponse = null;
+    let lastErr = null;
+
     const requestBody = {
       contents: [
         {
@@ -92,12 +98,33 @@ app.post('/webhook/whatsapp', async (req, res) => {
       }
     };
 
-    const geminiResponse = await axios.post(geminiUrl, requestBody, {
-      headers: {
-        'x-goog-api-key': apiKey,
-        'Content-Type': 'application/json'
+    // Tenta cada modelo até obter resposta com sucesso
+    for (const modelName of candidateModels) {
+      try {
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+        console.log(`[Gemini Request] Tentando modelo: ${modelName}...`);
+        
+        geminiResponse = await axios.post(geminiUrl, requestBody, {
+          headers: {
+            'x-goog-api-key': apiKey,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (geminiResponse.data) {
+          console.log(`[Gemini Success] Respondido com sucesso pelo modelo ${modelName}!`);
+          break;
+        }
+      } catch (err) {
+        lastErr = err.response?.data || err.message;
+        console.warn(`[Gemini Warning] Modelo ${modelName} retornou erro, tentando o próximo...`);
       }
-    });
+    }
+
+    if (!geminiResponse || !geminiResponse.data) {
+      console.error('[Gemini All Models Failed]:', JSON.stringify(lastErr));
+      return res.status(500).json({ error: 'ALL_GEMINI_MODELS_FAILED', details: lastErr });
+    }
 
     const responseText = geminiResponse.data.candidates[0].content.parts[0].text;
     const parsedJSON = JSON.parse(responseText);
