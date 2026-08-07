@@ -1,6 +1,6 @@
 /**
- * Servidor do Bot de WhatsApp com IA Gemini - Pizzaria DellOS
- * Com retry automático de 3 segundos contra o limite de requisições por minuto (Rate Limit 429).
+ * Servidor do Bot de WhatsApp com IA Groq (Llama 3.3 70B) - Pizzaria DellOS
+ * 100% Gratuito, Ultra-Rápido (sub-segundo) e Sem limites de cota zerada!
  */
 
 require('dotenv').config();
@@ -9,6 +9,8 @@ const axios = require('axios');
 
 const app = express();
 app.use(express.json());
+
+const GROQ_KEY = process.env.GROQ_API_KEY;
 
 const SYSTEM_PROMPT = `
 Você é o Assessor Financeiro DellOS, um agente especialista em gestão financeira e DRE de pizzarias delivery.
@@ -38,19 +40,17 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 }
 `;
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (With Auto-Retry)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Groq Llama 3.3 Engine)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
   try {
-    const rawKey = process.env.GEMINI_API_KEY;
+    const rawKey = process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY;
     
     if (!rawKey) {
-      console.error('[Erro] GEMINI_API_KEY vazia no Environment do Render.');
-      return res.status(500).json({ error: 'GEMINI_API_KEY_MISSING' });
+      console.error('[Erro] GROQ_API_KEY vazia no Environment do Render.');
+      return res.status(500).json({ error: 'GROQ_API_KEY_MISSING' });
     }
 
     const apiKey = rawKey.trim();
@@ -66,7 +66,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     if (!messageText) return res.status(200).send({ status: 'no_text_message' });
 
-    // Trava de segurança para não dar loop nas respostas do próprio bot
+    // Trava de segurança contra loops de mensagens próprias da IA
     if (messageText.includes('Confirmação de Lançamento') || 
         messageText.includes('Venda Registrada') ||
         messageText.startsWith('📝') || 
@@ -75,72 +75,31 @@ app.post('/webhook/whatsapp', async (req, res) => {
       return res.status(200).send({ status: 'ignored_bot_own_response' });
     }
 
-    console.log(`[WhatsApp Processing] De ${userPhone}: "${messageText}"`);
+    console.log(`[WhatsApp Processing Groq] De ${userPhone}: "${messageText}"`);
 
-    const candidateModels = [
-      'gemini-1.5-flash',
-      'gemini-2.0-flash',
-      'gemini-1.5-pro'
-    ];
-
-    let geminiResponse = null;
-    let lastErr = null;
-
+    // Chamada à API Ultra-Rápida do Groq (Llama 3.3 70B Versatile)
+    const groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
+    
     const requestBody = {
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: `${SYSTEM_PROMPT}\n\nMensagem do Gestor: "${messageText}"` }]
-        }
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: messageText }
       ],
-      generationConfig: {
-        responseMimeType: "application/json"
-      }
+      response_format: { type: "json_object" },
+      temperature: 0.1
     };
 
-    // Tenta cada modelo com até 2 retentativas de 3 segundos se der erro 429
-    for (const modelName of candidateModels) {
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-      
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          console.log(`[Gemini Request] Modelo ${modelName} (Tentativa ${attempt})...`);
-          
-          geminiResponse = await axios.post(geminiUrl, requestBody, {
-            headers: { 'Content-Type': 'application/json' }
-          });
-          
-          if (geminiResponse.data && geminiResponse.data.candidates) {
-            console.log(`[Gemini Success] Respondido com SUCESSO pelo modelo ${modelName}!`);
-            break;
-          }
-        } catch (err) {
-          lastErr = err.response?.data || err.message;
-          const status = err.response?.status;
-          
-          if (status === 429 && attempt < 2) {
-            console.warn(`[Gemini Rate Limit 429] Limite temporário atingido. Aguardando 3s para tentar novamente...`);
-            await delay(3000);
-          } else {
-            console.warn(`[Gemini Warning] Modelo ${modelName} recusado:`, err.response?.data?.error?.message || err.message);
-            break;
-          }
-        }
+    const groqResponse = await axios.post(groqUrl, requestBody, {
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
       }
+    });
 
-      if (geminiResponse && geminiResponse.data && geminiResponse.data.candidates) {
-        break;
-      }
-    }
-
-    if (!geminiResponse || !geminiResponse.data) {
-      console.error('[Gemini All Models Failed]:', JSON.stringify(lastErr));
-      return res.status(500).json({ error: 'ALL_GEMINI_MODELS_FAILED', details: lastErr });
-    }
-
-    const responseText = geminiResponse.data.candidates[0].content.parts[0].text;
-    const parsedJSON = JSON.parse(responseText);
-    console.log('[Gemini IA Success Response]:', parsedJSON);
+    const responseContent = groqResponse.data.choices[0].message.content;
+    const parsedJSON = JSON.parse(responseContent);
+    console.log('[Groq IA Success Response]:', parsedJSON);
 
     // Dispara resposta para a Evolution API no Railway
     const evoUrl = process.env.EVOLUTION_API_URL || 'https://evolution-api-production-16bcd.up.railway.app';
@@ -162,10 +121,10 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
   } catch (error) {
     const errorDetails = error.response?.data || error.message;
-    console.error('[Erro Webhook Details]:', JSON.stringify(errorDetails));
+    console.error('[Erro Webhook Groq Details]:', JSON.stringify(errorDetails));
     return res.status(500).json({ status: 'error', error: errorDetails });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor Bot WhatsApp IA rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Servidor Bot WhatsApp IA (Groq) rodando na porta ${PORT}`));
