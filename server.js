@@ -1,6 +1,6 @@
 /**
  * Servidor do Bot de WhatsApp com IA Gemini - Pizzaria DellOS
- * Compatível 100% com as novas chaves `AQ.` do Google AI Studio 2026.
+ * Passa o parâmetro ?key= e header x-goog-api-key para compatibilidade total.
  */
 
 require('dotenv').config();
@@ -9,8 +9,6 @@ const axios = require('axios');
 
 const app = express();
 app.use(express.json());
-
-const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 const SYSTEM_PROMPT = `
 Você é o Assessor Financeiro DellOS, um agente especialista em gestão financeira e DRE de pizzarias delivery.
@@ -41,19 +39,22 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Chaves AQ. Válidas)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (REST Engine)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
   try {
-    if (!GEMINI_KEY) {
-      console.error('[Erro] GEMINI_API_KEY não configurada nas variáveis de ambiente.');
+    const rawKey = process.env.GEMINI_API_KEY;
+    
+    if (!rawKey) {
+      console.error('[Erro] GEMINI_API_KEY vazia ou não encontrada no Environment do Render.');
       return res.status(500).json({ error: 'GEMINI_API_KEY_MISSING' });
     }
 
-    const payload = req.body;
-    console.log('[Webhook Received]:', JSON.stringify(payload));
+    const apiKey = rawKey.trim();
+    console.log(`[Gemini Auth] Usando chave com prefixo: ${apiKey.substring(0, 10)}...`);
 
+    const payload = req.body;
     const messageData = payload.data || payload;
     const userPhone = messageData.key?.remoteJid;
 
@@ -65,7 +66,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     if (!messageText) return res.status(200).send({ status: 'no_text_message' });
 
-    // Trava de segurança para não dar loop infinito nas respostas da IA
+    // Trava de segurança para não dar loop nas respostas da própria IA
     if (messageText.includes('Confirmação de Lançamento') || 
         messageText.includes('Venda Registrada') ||
         messageText.startsWith('📝') || 
@@ -76,8 +77,8 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     console.log(`[WhatsApp Processing] De ${userPhone}: "${messageText}"`);
 
-    // Chamada HTTP Direta à API do Gemini suportando o novo formato `AQ.` da Google
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent`;
+    // Endpoint REST oficial com chave no ?key= e no header x-goog-api-key
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     
     const requestBody = {
       contents: [
@@ -93,16 +94,16 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     const geminiResponse = await axios.post(geminiUrl, requestBody, {
       headers: {
-        'x-goog-api-key': GEMINI_KEY.trim(),
+        'x-goog-api-key': apiKey,
         'Content-Type': 'application/json'
       }
     });
 
     const responseText = geminiResponse.data.candidates[0].content.parts[0].text;
     const parsedJSON = JSON.parse(responseText);
-    console.log('[Gemini IA Response]:', parsedJSON);
+    console.log('[Gemini IA Success Response]:', parsedJSON);
 
-    // Dispara mensagem de volta via Evolution API se a URL estiver configurada
+    // Dispara resposta para a Evolution API no Railway
     const evoUrl = process.env.EVOLUTION_API_URL || 'https://evolution-api-production-16bcd.up.railway.app';
     const evoKey = process.env.EVOLUTION_API_KEY || 'dellos_pizza_2026';
     const instanceName = process.env.EVOLUTION_INSTANCE || 'PizzariaFinanceiro';
@@ -121,8 +122,9 @@ app.post('/webhook/whatsapp', async (req, res) => {
     return res.status(200).json({ status: 'success', parsed: parsedJSON });
 
   } catch (error) {
-    console.error('[Erro Webhook]:', error.response?.data || error.message);
-    return res.status(500).json({ status: 'error', error: error.response?.data || error.message });
+    const errorDetails = error.response?.data || error.message;
+    console.error('[Erro Webhook Details]:', JSON.stringify(errorDetails));
+    return res.status(500).json({ status: 'error', error: errorDetails });
   }
 });
 
