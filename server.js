@@ -1,6 +1,6 @@
 /**
  * Servidor do Bot de WhatsApp com IA Gemini - Pizzaria DellOS
- * Auto-descoberta filtrando especificamente modelos de Texto (excluindo TTS/Embeddings).
+ * Prioridade absoluta no modelo oficial gratuito 'gemini-1.5-flash'.
  */
 
 require('dotenv').config();
@@ -39,7 +39,7 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Text Engine)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Gemini 1.5 Flash)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -75,26 +75,12 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     console.log(`[WhatsApp Processing] De ${userPhone}: "${messageText}"`);
 
-    // 1. Auto-descobre apenas modelos puramente de TEXTO (excluindo TTS, Audio, Embeddings)
-    let availableModelNames = [];
-    try {
-      const listResp = await axios.get(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-      if (listResp.data && listResp.data.models) {
-        availableModelNames = listResp.data.models
-          .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
-          .map(m => m.name.replace('models/', ''))
-          .filter(name => !name.includes('tts') && !name.includes('embedding') && !name.includes('imagen') && !name.includes('aqa'));
-        
-        console.log('[Gemini Auto-Discovery] Modelos de texto filtrados:', availableModelNames);
-      }
-    } catch (listErr) {
-      console.warn('[Gemini Auto-Discovery Warning] Não foi possível listar modelos:', listErr.message);
-    }
-
-    // Se o filtro não encontrar nenhum, usa a lista prioritária
-    if (availableModelNames.length === 0) {
-      availableModelNames = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-1.5-pro'];
-    }
+    // Prioridade máxima no modelo padrão gratuito do Google AI Studio (gemini-1.5-flash)
+    const priorityModels = [
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+      'gemini-2.0-flash'
+    ];
 
     let geminiResponse = null;
     let lastErr = null;
@@ -111,11 +97,11 @@ app.post('/webhook/whatsapp', async (req, res) => {
       }
     };
 
-    // Tenta cada modelo de texto disponível
-    for (const modelName of availableModelNames) {
+    // Tenta primeiro o modelo gratuito oficial gemini-1.5-flash
+    for (const modelName of priorityModels) {
       try {
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-        console.log(`[Gemini Request] Chamando modelo de texto: ${modelName}...`);
+        console.log(`[Gemini Request] Chamando modelo gratuito prioritário: ${modelName}...`);
         
         geminiResponse = await axios.post(geminiUrl, requestBody, {
           headers: {
@@ -129,7 +115,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
         }
       } catch (err) {
         lastErr = err.response?.data || err.message;
-        console.warn(`[Gemini Warning] Modelo ${modelName} ignorado. Motivo:`, err.response?.data?.error?.message || err.message);
+        console.warn(`[Gemini Warning] Modelo ${modelName} recusado. Motivo:`, err.response?.data?.error?.message || err.message);
       }
     }
 
