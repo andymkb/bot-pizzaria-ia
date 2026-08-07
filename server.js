@@ -1,6 +1,6 @@
 /**
  * Servidor do Bot de WhatsApp com IA Gemini - Pizzaria DellOS
- * Prioridade absoluta no modelo oficial gratuito 'gemini-1.5-flash'.
+ * Com retry automático de 3 segundos contra o limite de requisições por minuto (Rate Limit 429).
  */
 
 require('dotenv').config();
@@ -38,8 +38,10 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 }
 `;
 
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Gemini 1.5 Flash)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (With Auto-Retry)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -75,11 +77,10 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     console.log(`[WhatsApp Processing] De ${userPhone}: "${messageText}"`);
 
-    // Prioridade máxima no modelo padrão gratuito do Google AI Studio (gemini-1.5-flash)
-    const priorityModels = [
+    const candidateModels = [
       'gemini-1.5-flash',
-      'gemini-1.5-pro',
-      'gemini-2.0-flash'
+      'gemini-2.0-flash',
+      'gemini-1.5-pro'
     ];
 
     let geminiResponse = null;
@@ -97,25 +98,38 @@ app.post('/webhook/whatsapp', async (req, res) => {
       }
     };
 
-    // Tenta primeiro o modelo gratuito oficial gemini-1.5-flash
-    for (const modelName of priorityModels) {
-      try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-        console.log(`[Gemini Request] Chamando modelo gratuito prioritário: ${modelName}...`);
-        
-        geminiResponse = await axios.post(geminiUrl, requestBody, {
-          headers: {
-            'Content-Type': 'application/json'
+    // Tenta cada modelo com até 2 retentativas de 3 segundos se der erro 429
+    for (const modelName of candidateModels) {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          console.log(`[Gemini Request] Modelo ${modelName} (Tentativa ${attempt})...`);
+          
+          geminiResponse = await axios.post(geminiUrl, requestBody, {
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (geminiResponse.data && geminiResponse.data.candidates) {
+            console.log(`[Gemini Success] Respondido com SUCESSO pelo modelo ${modelName}!`);
+            break;
           }
-        });
-        
-        if (geminiResponse.data && geminiResponse.data.candidates) {
-          console.log(`[Gemini Success] Respondido com SUCESSO pelo modelo: ${modelName}!`);
-          break;
+        } catch (err) {
+          lastErr = err.response?.data || err.message;
+          const status = err.response?.status;
+          
+          if (status === 429 && attempt < 2) {
+            console.warn(`[Gemini Rate Limit 429] Limite temporário atingido. Aguardando 3s para tentar novamente...`);
+            await delay(3000);
+          } else {
+            console.warn(`[Gemini Warning] Modelo ${modelName} recusado:`, err.response?.data?.error?.message || err.message);
+            break;
+          }
         }
-      } catch (err) {
-        lastErr = err.response?.data || err.message;
-        console.warn(`[Gemini Warning] Modelo ${modelName} recusado. Motivo:`, err.response?.data?.error?.message || err.message);
+      }
+
+      if (geminiResponse && geminiResponse.data && geminiResponse.data.candidates) {
+        break;
       }
     }
 
