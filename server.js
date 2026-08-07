@@ -1,6 +1,7 @@
 /**
  * Servidor do Bot de WhatsApp com IA Groq (Llama 3.3 70B) + Conexão Supabase
- * BLOQUEIO RIGOROSO DE GRUPOS (@g.us) - Responde apenas em chats privados!
+ * TRAVA EXCLUSIVA DE USO PESSOAL (fromMe: true): Responde APENAS mensagens enviadas por VOCÊ!
+ * Ignora 100% de mensagens de clientes, amigos, contatos terceiros e grupos.
  */
 
 require('dotenv').config();
@@ -42,7 +43,7 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Private Chats Only)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Gestor Exclusive Mode)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -58,13 +59,20 @@ app.post('/webhook/whatsapp', async (req, res) => {
     const payload = req.body;
     const messageData = payload.data || payload;
     const userPhone = messageData.key?.remoteJid;
+    const isFromMe = messageData.key?.fromMe;
 
     if (!userPhone) return res.status(200).send({ status: 'no_user_phone' });
 
-    // 🛑 BLOQUEIO ABSOLUTO DE GRUPOS DO WHATSAPP (@g.us)
+    // 🛑 BLOQUEIO RIGOROSO 1: Ignora 100% de grupos (@g.us)
     if (userPhone.endsWith('@g.us') || messageData.key?.participant) {
       console.log(`[WhatsApp Ignored Group] Mensagem de grupo ignorada (${userPhone})`);
       return res.status(200).send({ status: 'ignored_group_message' });
+    }
+
+    // 🛑 BLOQUEIO RIGOROSO 2: Ignora qualquer mensagem que NÃO tenha sido enviada por VOCÊ (fromMe == false)
+    if (!isFromMe) {
+      console.log(`[WhatsApp Ignored Third-Party] Mensagem de terceiro ignorada (${userPhone})`);
+      return res.status(200).send({ status: 'ignored_third_party_message' });
     }
 
     const messageText = messageData.message?.conversation || 
@@ -73,16 +81,17 @@ app.post('/webhook/whatsapp', async (req, res) => {
 
     if (!messageText) return res.status(200).send({ status: 'no_text_message' });
 
-    // Trava de segurança contra loops de mensagens próprias da IA
+    // Trava de segurança contra loops de mensagens enviadas pela própria IA
     if (messageText.includes('Confirmação de Lançamento') || 
         messageText.includes('Venda Registrada') ||
+        messageText.includes('Confirmação de compra') ||
         messageText.startsWith('📝') || 
         messageText.startsWith('🍕') || 
         messageText.startsWith('✅')) {
       return res.status(200).send({ status: 'ignored_bot_own_response' });
     }
 
-    console.log(`[WhatsApp Processing Private Chat] De ${userPhone}: "${messageText}"`);
+    console.log(`[WhatsApp Processing Gestor Private Chat] De ${userPhone}: "${messageText}"`);
 
     // Chamada à API Ultra-Rápida do Groq (Llama 3.3 70B Versatile)
     const groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
@@ -159,4 +168,4 @@ app.post('/webhook/whatsapp', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor Bot WhatsApp IA (Groq + Supabase) rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Servidor Bot WhatsApp IA (Exclusive Gestor Mode) rodando na porta ${PORT}`));
