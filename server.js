@@ -1,7 +1,8 @@
 /**
  * Servidor do Bot de WhatsApp com IA Groq (Llama 3.3 70B) + Conexão Supabase
- * MÉTODO 1: ATIVAÇÃO EXCLUSIVA EM GRUPOS COM NOME/EMOJI '🍕' OU 'Lançamentos'
- * Ignora 100% de conversas privadas, contatos pessoais e outros grupos!
+ * TRAVA MATEMÁTICA DE GRUPO ÚNICO (ALLOWED_GROUP_ID):
+ * Responde EXCLUSIVAMENTE ao ID do Grupo de Lançamentos da Pizzaria.
+ * Ignora 100% de outros grupos, conversas privadas e contatos pessoais.
  */
 
 require('dotenv').config();
@@ -13,6 +14,8 @@ app.use(express.json());
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://xahnpppotcieqdqspvmy.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_KEY || 'sb_publishable_sw3WY4mg1fX0bNJT6bSDjA_gzBczyB-';
+
+const ALLOWED_GROUP_ID = process.env.ALLOWED_GROUP_ID;
 
 const SYSTEM_PROMPT = `
 Você é o Assessor Financeiro DellOS, um agente especialista em gestão financeira e DRE de pizzarias delivery.
@@ -43,7 +46,7 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Method 1: Finance Group Mode)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Single Group Lock Mode)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -58,37 +61,26 @@ app.post('/webhook/whatsapp', async (req, res) => {
     const apiKey = rawKey.trim();
     const payload = req.body;
     const messageData = payload.data || payload;
-    const userPhone = messageData.key?.remoteJid;
+    const userPhone = messageData.key?.remoteJid || messageData.remoteJid;
 
     if (!userPhone) return res.status(200).send({ status: 'no_user_phone' });
 
-    // 🛑 BLOQUEIO RIGOROSO 1: Ignora conversas privadas (aceita apenas grupos @g.us)
-    if (!userPhone.endsWith('@g.us')) {
+    // 🛑 BLOQUEIO 1: Ignora conversas privadas individuais (só aceita grupos @g.us)
+    const isGroup = userPhone.endsWith('@g.us') || !!messageData.key?.participant;
+    if (!isGroup) {
       console.log(`[WhatsApp Ignored Private Chat] Conversa privada ignorada (${userPhone})`);
       return res.status(200).send({ status: 'ignored_private_chat' });
     }
 
-    // Extrai o nome do grupo ou os metadados
-    const groupName = messageData.groupData?.subject || messageData.groupSubject || '';
+    // 🛑 BLOQUEIO 2: Se o ALLOWED_GROUP_ID estiver configurado, aceita APENAS a mensagem desse grupo exato!
+    if (ALLOWED_GROUP_ID && ALLOWED_GROUP_ID.trim() !== '' && userPhone !== ALLOWED_GROUP_ID.trim()) {
+      console.log(`[WhatsApp Ignored Unallowed Group] Grupo ${userPhone} não é o autorizado (${ALLOWED_GROUP_ID})`);
+      return res.status(200).send({ status: 'ignored_unallowed_group' });
+    }
+
     const messageText = messageData.message?.conversation || 
                         messageData.message?.extendedTextMessage?.text ||
                         messageData.body || '';
-
-    // 🛑 BLOQUEIO RIGOROSO 2 (MÉTODO 1): O grupo ou a mensagem DEVE conter o emoji '🍕' ou palavras-chave de finanças!
-    const isTargetGroup = groupName.includes('🍕') || 
-                          groupName.toLowerCase().includes('lançamento') || 
-                          groupName.toLowerCase().includes('lancamento') ||
-                          groupName.toLowerCase().includes('pizzaria') ||
-                          groupName.toLowerCase().includes('financeiro') ||
-                          messageText.includes('🍕') ||
-                          messageText.toLowerCase().startsWith('lançar') ||
-                          messageText.toLowerCase().startsWith('gastei') ||
-                          messageText.toLowerCase().startsWith('comprei');
-
-    if (!isTargetGroup) {
-      console.log(`[WhatsApp Ignored Non-Finance Group] Mensagem de grupo não-financeiro ignorada (${userPhone})`);
-      return res.status(200).send({ status: 'ignored_non_finance_group' });
-    }
 
     if (!messageText) return res.status(200).send({ status: 'no_text_message' });
 
@@ -102,7 +94,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
       return res.status(200).send({ status: 'ignored_bot_own_response' });
     }
 
-    console.log(`[WhatsApp Method 1 Match] Grupo: "${groupName}" (${userPhone}) | Mensagem: "${messageText}"`);
+    console.log(`[WhatsApp Target Group Match!] Grupo ID: "${userPhone}" | Mensagem: "${messageText}"`);
 
     // Chamada à API Ultra-Rápida do Groq (Llama 3.3 70B Versatile)
     const groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
@@ -178,4 +170,4 @@ app.post('/webhook/whatsapp', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor Bot WhatsApp IA (Method 1: Finance Group Mode) rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Servidor Bot WhatsApp IA (Single Group Lock Mode) rodando na porta ${PORT}`));
