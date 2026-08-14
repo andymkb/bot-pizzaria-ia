@@ -1,7 +1,7 @@
 /**
  * Servidor do Bot de WhatsApp com IA Groq (Llama 3.3 70B) + Conexão Supabase
- * TRAVA EXCLUSIVA DE USO PESSOAL (fromMe: true): Responde APENAS mensagens enviadas por VOCÊ!
- * Ignora 100% de mensagens de clientes, amigos, contatos terceiros e grupos.
+ * MÉTODO 1: ATIVAÇÃO EXCLUSIVA EM GRUPOS COM NOME/EMOJI '🍕' OU 'Lançamentos'
+ * Ignora 100% de conversas privadas, contatos pessoais e outros grupos!
  */
 
 require('dotenv').config();
@@ -18,7 +18,7 @@ const SYSTEM_PROMPT = `
 Você é o Assessor Financeiro DellOS, um agente especialista em gestão financeira e DRE de pizzarias delivery.
 
 SEU OBJETIVO:
-Interpretar dados de despesas, compras de insumos, contas ou vendas informados pelo gestor (em texto ou áudio) e convertê-los em um registro JSON perfeitamente estruturado.
+Interpretar dados de despesas, compras de insumos, contas ou vendas informados pelo gestor ou sua sócia (em texto ou áudio) e convertê-los em um registro JSON perfeitamente estruturado.
 
 REGRAS DE CLASSIFICAÇÃO DRE:
 1. RECEITA_VENDAS: Vendas diárias de delivery/balcão.
@@ -29,7 +29,7 @@ REGRAS DE CLASSIFICAÇÃO DRE:
 
 Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 {
-  "mensagem_whatsapp": "Texto formatado com emojis em negrito confirmando os dados lidos para o gestor",
+  "mensagem_whatsapp": "Texto formatado com emojis em negrito confirmando os dados lidos para os sócios",
   "transacao": {
     "tipo": "despesa",
     "categoria_dre": "CMV_INSUMOS",
@@ -43,7 +43,7 @@ Sua resposta DEVE ser um objeto JSON válido no seguinte formato:
 `;
 
 app.get('/', (req, res) => {
-  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Gestor Exclusive Mode)');
+  res.send('🍕 DellOS Pizza WhatsApp IA Server - Status: ONLINE (Method 1: Finance Group Mode)');
 });
 
 app.post('/webhook/whatsapp', async (req, res) => {
@@ -59,25 +59,36 @@ app.post('/webhook/whatsapp', async (req, res) => {
     const payload = req.body;
     const messageData = payload.data || payload;
     const userPhone = messageData.key?.remoteJid;
-    const isFromMe = messageData.key?.fromMe;
 
     if (!userPhone) return res.status(200).send({ status: 'no_user_phone' });
 
-    // 🛑 BLOQUEIO RIGOROSO 1: Ignora 100% de grupos (@g.us)
-    if (userPhone.endsWith('@g.us') || messageData.key?.participant) {
-      console.log(`[WhatsApp Ignored Group] Mensagem de grupo ignorada (${userPhone})`);
-      return res.status(200).send({ status: 'ignored_group_message' });
+    // 🛑 BLOQUEIO RIGOROSO 1: Ignora conversas privadas (aceita apenas grupos @g.us)
+    if (!userPhone.endsWith('@g.us')) {
+      console.log(`[WhatsApp Ignored Private Chat] Conversa privada ignorada (${userPhone})`);
+      return res.status(200).send({ status: 'ignored_private_chat' });
     }
 
-    // 🛑 BLOQUEIO RIGOROSO 2: Ignora qualquer mensagem que NÃO tenha sido enviada por VOCÊ (fromMe == false)
-    if (!isFromMe) {
-      console.log(`[WhatsApp Ignored Third-Party] Mensagem de terceiro ignorada (${userPhone})`);
-      return res.status(200).send({ status: 'ignored_third_party_message' });
-    }
-
+    // Extrai o nome do grupo ou os metadados
+    const groupName = messageData.groupData?.subject || messageData.groupSubject || '';
     const messageText = messageData.message?.conversation || 
                         messageData.message?.extendedTextMessage?.text ||
-                        messageData.body;
+                        messageData.body || '';
+
+    // 🛑 BLOQUEIO RIGOROSO 2 (MÉTODO 1): O grupo ou a mensagem DEVE conter o emoji '🍕' ou palavras-chave de finanças!
+    const isTargetGroup = groupName.includes('🍕') || 
+                          groupName.toLowerCase().includes('lançamento') || 
+                          groupName.toLowerCase().includes('lancamento') ||
+                          groupName.toLowerCase().includes('pizzaria') ||
+                          groupName.toLowerCase().includes('financeiro') ||
+                          messageText.includes('🍕') ||
+                          messageText.toLowerCase().startsWith('lançar') ||
+                          messageText.toLowerCase().startsWith('gastei') ||
+                          messageText.toLowerCase().startsWith('comprei');
+
+    if (!isTargetGroup) {
+      console.log(`[WhatsApp Ignored Non-Finance Group] Mensagem de grupo não-financeiro ignorada (${userPhone})`);
+      return res.status(200).send({ status: 'ignored_non_finance_group' });
+    }
 
     if (!messageText) return res.status(200).send({ status: 'no_text_message' });
 
@@ -91,7 +102,7 @@ app.post('/webhook/whatsapp', async (req, res) => {
       return res.status(200).send({ status: 'ignored_bot_own_response' });
     }
 
-    console.log(`[WhatsApp Processing Gestor Private Chat] De ${userPhone}: "${messageText}"`);
+    console.log(`[WhatsApp Method 1 Match] Grupo: "${groupName}" (${userPhone}) | Mensagem: "${messageText}"`);
 
     // Chamada à API Ultra-Rápida do Groq (Llama 3.3 70B Versatile)
     const groqUrl = 'https://api.groq.com/openai/v1/chat/completions';
@@ -142,20 +153,19 @@ app.post('/webhook/whatsapp', async (req, res) => {
       console.error('[Supabase Warning] Erro ao gravar transação no banco:', dbErr.response?.data || dbErr.message);
     }
 
-    // Dispara resposta para a Evolution API no Railway
+    // Dispara resposta DE VOLTA NO MESMO GRUPO via Evolution API
     const evoUrl = process.env.EVOLUTION_API_URL || 'https://evolution-api-production-16bcd.up.railway.app';
     const evoKey = process.env.EVOLUTION_API_KEY || 'dellos_pizza_2026';
     const instanceName = process.env.EVOLUTION_INSTANCE || 'PizzariaFinanceiro';
 
     if (evoUrl) {
-      const cleanPhone = userPhone.replace('@s.whatsapp.net', '');
       await axios.post(`${evoUrl}/message/sendText/${instanceName}`, {
-        number: cleanPhone,
+        number: userPhone,
         text: parsedJSON.mensagem_whatsapp
       }, {
         headers: { 'apikey': evoKey }
       });
-      console.log(`[Evolution Send Success] Resposta enviada para ${cleanPhone}`);
+      console.log(`[Evolution Send Success] Resposta enviada no Grupo ${userPhone}`);
     }
 
     return res.status(200).json({ status: 'success', parsed: parsedJSON });
@@ -168,4 +178,4 @@ app.post('/webhook/whatsapp', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor Bot WhatsApp IA (Exclusive Gestor Mode) rodando na porta ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Servidor Bot WhatsApp IA (Method 1: Finance Group Mode) rodando na porta ${PORT}`));
